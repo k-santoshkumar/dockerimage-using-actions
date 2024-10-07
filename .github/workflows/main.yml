@@ -1,0 +1,153 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'src/**'
+      - 'requirements.txt'
+      - '.github/workflows/main.yml'
+      - 'data/**'
+
+jobs:
+  preprocess:
+    name: Data Preprocessing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Data Preprocessing
+        run: |
+          python src/data_preprocess.py
+
+      - name: Upload Preprocessor Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: preprocessors
+          path: artifacts/preprocessors/
+
+  train:
+    name: Model Training
+    runs-on: ubuntu-latest
+    needs: preprocess
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Download Preprocessor Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: preprocessors
+          path: artifacts/preprocessors/
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Model Training
+        run: |
+          python src/train_models.py
+
+      - name: Upload Model Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: models
+          path: artifacts/models/
+
+  evaluate:
+    name: Model Evaluation
+    runs-on: ubuntu-latest
+    needs: train
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Download Model Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: models
+          path: artifacts/models/
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Model Evaluation
+        run: |
+          python src/evaluate_models.py
+
+      - name: Upload Evaluation Metrics
+        uses: actions/upload-artifact@v3
+        with:
+          name: metrics
+          path: artifacts/metrics/
+
+  build-and-push-docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: evaluate
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Download Preprocessor Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: preprocessors
+          path: artifacts/preprocessors/
+
+      - name: Download Model Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: models
+          path: artifacts/models/
+
+      - name: Download Evaluation Metrics
+        uses: actions/download-artifact@v3
+        with:
+          name: metrics
+          path: artifacts/metrics/
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/customer-churn-api:latest
